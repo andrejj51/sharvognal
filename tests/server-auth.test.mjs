@@ -9,10 +9,12 @@ import {fileURLToPath} from 'node:url';
 import net from 'node:net';
 import {createStore} from '../db.mjs';
 
-test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and public assets',async t=>{
+async function startServer(t,prepareStore=()=>({})) {
   const root=dirname(dirname(fileURLToPath(import.meta.url))),temp=mkdtempSync(join(tmpdir(),'pingpong-auth-'));
   const path=join(temp,'club.sqlite'),store=createStore(path);
-  const owner=store.addPlayer({name:'Владелец'}),other=store.addPlayer({name:'Друг'});store.close();
+  let prepared;
+  try { prepared=prepareStore(store)||{}; }
+  finally { store.close(); }
   const listener=net.createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
   const child=spawn(process.execPath,[join(root,'server.mjs')],{env:{...process.env,PORT:String(port),PINGPONG_HOST:'127.0.0.1',PINGPONG_PUBLIC_URL:'',PINGPONG_DB:path,PINGPONG_RUNTIME:join(temp,'runtime'),PINGPONG_SETUP_GUIDE:join(temp,'setup.txt')},stdio:['ignore','pipe','pipe'],windowsHide:true});
   t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}rmSync(temp,{recursive:true,force:true});});
@@ -22,6 +24,11 @@ test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and p
     const response=await fetch(origin+path,{method,headers:{...(input?{'Content-Type':'application/json'}:{}),...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...extra},body:input?JSON.stringify(input):undefined});
     return {response,data:await response.json()};
   }
+  return {origin,temp,request,...prepared};
+}
+
+test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and public assets',async t=>{
+  const {origin,temp,request,owner,other}=await startServer(t,store=>({owner:store.addPlayer({name:'Владелец'}),other:store.addPlayer({name:'Друг'})}));
   const initial=await request('/api/state');assert.equal(initial.data.auth.setup_required,true);
   assert.equal((await request('/api/players','POST',{name:'Взлом'})).response.status,401);
   assert.equal((await request('/api/auth/setup','POST',{setup_key:'wrong'})).response.status,403);
@@ -47,4 +54,12 @@ test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and p
   for(const asset of ['/','/app.js','/community.js','/qrcodegen.js','/zazerkalye.css'])assert.equal((await fetch(origin+asset)).status,200);
   assert.equal((await request('/api/auth/logout','POST',{},rookie)).response.status,200);
   assert.equal((await request('/api/state','GET',undefined,rookie)).data.auth.user,null);
+});
+
+test('Login limiter separates real client IPs forwarded by local nginx',async t=>{
+  const {request}=await startServer(t);
+  const input={setup_key:'wrong'};
+  for(let i=0;i<30;i++) assert.equal((await request('/api/auth/setup','POST',input,null,{'X-Forwarded-For':'203.0.113.10'})).response.status,403);
+  assert.equal((await request('/api/auth/setup','POST',input,null,{'X-Forwarded-For':'203.0.113.10'})).response.status,429);
+  assert.equal((await request('/api/auth/setup','POST',input,null,{'X-Forwarded-For':'203.0.113.11'})).response.status,403);
 });

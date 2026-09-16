@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node
 import {randomBytes} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, resolve, sep } from 'node:path';
+import {isIP} from 'node:net';
 import { createStore } from './db.mjs';
 import {createClub} from './club.mjs';
 
@@ -24,8 +25,16 @@ if(club.state(null).auth.setup_required) writeFileSync(setupGuide,`Открой�
 const allowedOrigins=new Set([`http://127.0.0.1:${port}`,`http://localhost:${port}`,...(publicUrl?[new URL(publicUrl).origin]:[])]);
 const allowedHosts=new Set([...allowedOrigins].map(origin=>new URL(origin).host));
 const attempts=new Map();
+const trustedProxyAddresses=new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
+function clientAddress(req) {
+  const remote=req.socket.remoteAddress||'unknown';
+  if(!trustedProxyAddresses.has(remote)) return remote;
+  const header=Array.isArray(req.headers['x-forwarded-for'])?req.headers['x-forwarded-for'][0]:req.headers['x-forwarded-for'];
+  const forwarded=String(header||'').split(',')[0].trim();
+  return isIP(forwarded)?forwarded:remote;
+}
 function limit(req) {
-  const key=req.socket.remoteAddress||'unknown',time=Date.now(),old=attempts.get(key);
+  const key=clientAddress(req),time=Date.now(),old=attempts.get(key);
   const item=old&&old.until>time?old:{count:0,until:time+15*60000};
   if(++item.count>30) {const e=new Error('Слишком много попыток. Повторите через 15 минут.');e.status=429;throw e;}
   if(attempts.size>5000) for(const [k,v] of attempts) if(v.until<=time) attempts.delete(k);
