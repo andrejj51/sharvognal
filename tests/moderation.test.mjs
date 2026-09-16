@@ -125,9 +125,10 @@ test('Blocked sessions stop working immediately; administrators can reset passwo
   await club.manageAccount(admin,otherId,{role:'player',blocked:true,reason:'Проверка блокировки'});
   assert.throws(()=>club.submitMatch(other,match),{status:401});
   await assert.rejects(club.login({login:'friend',password:'friend-password'}),{status:401});
-  await club.manageAccount(admin,otherId,{role:'trusted',blocked:false,password:'new-password-123',reason:'Восстановлен доступ'});
+  await assert.rejects(club.manageAccount(admin,otherId,{role:'trusted',blocked:false,password:'short',reason:'Восстановлен доступ'}),{status:400});
+  await club.manageAccount(admin,otherId,{role:'trusted',blocked:false,password:'newpwd',reason:'Восстановлен доступ'});
   await assert.rejects(club.login({login:'friend',password:'friend-password'}),{status:401});
-  const newToken=await club.login({login:'friend',password:'new-password-123'});
+  const newToken=await club.login({login:'friend',password:'newpwd'});
   assert.equal(club.session(newToken).role,'trusted');club.logout(newToken);assert.equal(club.session(newToken),null);
   await assert.rejects(club.manageAccount(admin,admin.id,{role:'player',blocked:true,reason:'Удаляю владельца'}),/администратора/);
 });

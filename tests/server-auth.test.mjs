@@ -32,13 +32,17 @@ test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and p
   const initial=await request('/api/state');assert.equal(initial.data.auth.setup_required,true);
   assert.equal((await request('/api/players','POST',{name:'Взлом'})).response.status,401);
   assert.equal((await request('/api/auth/setup','POST',{setup_key:'wrong'})).response.status,403);
-  const setup=await request('/api/auth/setup','POST',{setup_key:readFileSync(join(temp,'runtime','setup-key'),'utf8'),player_id:owner,login:'owner',password:'owner-password'});
+  const setupInput={setup_key:readFileSync(join(temp,'runtime','setup-key'),'utf8'),player_id:owner,login:'owner',password:'owner6'};
+  assert.equal((await request('/api/auth/setup','POST',{...setupInput,password:'short'})).response.status,400);
+  const setup=await request('/api/auth/setup','POST',setupInput);
   assert.equal(setup.response.status,200);const cookie=setup.response.headers.get('set-cookie');assert.ok(cookie.includes('HttpOnly'));assert.ok(cookie.includes('SameSite=Lax'));
   const admin={cookie:cookie.split(';')[0],csrf:setup.data.state.auth.user.csrf};
   assert.equal((await request('/api/meeting','PUT',{hours:3,public_url:''},{...admin,csrf:'wrong'})).response.status,403);
   assert.equal((await request('/api/meeting','PUT',{hours:3,public_url:''},admin,{Origin:'https://foreign.example'})).response.status,403);
   assert.equal((await request('/api/meeting','PUT',{hours:3,public_url:''},admin)).response.status,200);
-  const reg=await request('/api/auth/register','POST',{name:'Новичок',login:'rookie',password:'rookie-password'});
+  const registration={name:'Новичок',login:'rookie',password:'rookie'};
+  for(const password of ['short','a'.repeat(129)])assert.equal((await request('/api/auth/register','POST',{...registration,password})).response.status,400);
+  const reg=await request('/api/auth/register','POST',registration);
   assert.equal(reg.response.status,200);const rookie={cookie:reg.response.headers.get('set-cookie').split(';')[0],csrf:reg.data.state.auth.user.csrf},id=reg.data.state.auth.user.player_id;
   assert.equal(reg.data.state.players.length,2);assert.equal(reg.data.state.newcomers.length,1);
   const match={player_a:id,player_b:owner,best_of:1,sets:[[11,5]],played_at:new Date(Date.now()-60000).toISOString()};
@@ -54,6 +58,7 @@ test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and p
   for(const asset of ['/','/app.js','/community.js','/qrcodegen.js','/zazerkalye.css'])assert.equal((await fetch(origin+asset)).status,200);
   assert.equal((await request('/api/auth/logout','POST',{},rookie)).response.status,200);
   assert.equal((await request('/api/state','GET',undefined,rookie)).data.auth.user,null);
+  assert.equal((await request('/api/auth/login','POST',{login:'rookie',password:'rookie'})).response.status,200);
 });
 
 test('Login limiter separates real client IPs forwarded by local nginx',async t=>{

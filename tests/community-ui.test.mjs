@@ -35,6 +35,7 @@ test('Registered players appear in the table immediately and gain a rank after t
 test('Joining, invitations and pending profiles render without external services or podium frames',()=>{
   const ctx=context(structuredClone(base));
   let html=vm.runInContext('joinPage()',ctx);assert.ok(html.includes('join-form'));assert.ok(html.includes('1000 Elo'));
+  assert.match(html,/<input type="password"[^>]*minlength="6"/);assert.ok(html.includes('От 6 символов'));
   html=vm.runInContext('invitationPanel()',ctx);assert.ok(html.includes('<svg'));assert.ok(html.includes('http://127.0.0.1:8787/#join'));assert.ok(html.includes('локальный адрес'));assert.ok(!html.includes('<img'));
   vm.runInContext("state.newcomers=[{id:3,name:'Новичок',membership_status:'pending',rating:1000}];state.auth.user={id:3,player_id:3,role:'player'}",ctx);
   html=vm.runInContext('playerAvatar(player(3))',ctx);assert.ok(!html.includes('podium-'));assert.ok(!html.includes('Infinity'));

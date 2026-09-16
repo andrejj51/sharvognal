@@ -10,7 +10,7 @@ function equal(a,b) { const x=Buffer.from(String(a)),y=Buffer.from(String(b));re
 function credentials(input) {
   const login=String(input.login||'').trim().toLowerCase();
   if(!/^[a-z0-9_]{3,32}$/.test(login)) fail('Логин: 3–32 латинские буквы, цифры или знак _.');
-  if(typeof input.password!=='string'||input.password.length<10||input.password.length>128) fail('Пароль: от 10 до 128 символов.');
+  if(typeof input.password!=='string'||input.password.length<6||input.password.length>128) fail('Пароль: от 6 до 128 символов.');
   return login;
 }
 async function passwordHash(password,salt=randomBytes(16).toString('hex')) {
