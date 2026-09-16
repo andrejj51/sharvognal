@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import net from 'node:net';
+import {createStore} from '../db.mjs';
+
+test('HTTP login, cookies, CSRF, first-game confirmation, private profiles and public assets',async t=>{
+  const root=dirname(dirname(fileURLToPath(import.meta.url))),temp=mkdtempSync(join(tmpdir(),'pingpong-auth-'));
+  const path=join(temp,'club.sqlite'),store=createStore(path);
+  const owner=store.addPlayer({name:'Владелец'}),other=store.addPlayer({name:'Друг'});store.close();
+  const listener=net.createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
+  const child=spawn(process.execPath,[join(root,'server.mjs')],{env:{...process.env,PORT:String(port),PINGPONG_HOST:'127.0.0.1',PINGPONG_PUBLIC_URL:'',PINGPONG_DB:path,PINGPONG_RUNTIME:join(temp,'runtime'),PINGPONG_SETUP_GUIDE:join(temp,'setup.txt')},stdio:['ignore','pipe','pipe'],windowsHide:true});
+  t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}rmSync(temp,{recursive:true,force:true});});
+  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Server startup timed out')),10000);child.stdout.on('data',chunk=>{if(String(chunk).includes('Local:')){clearTimeout(timer);resolve();}});child.on('exit',code=>{clearTimeout(timer);reject(new Error('Server exited '+code));});});
+  const origin=`http://127.0.0.1:${port}`;
+  async function request(path,method='GET',input,auth,extra={}){
+    const response=await fetch(origin+path,{method,headers:{...(input?{'Content-Type':'application/json'}:{}),...(auth?{Cookie:auth.cookie,'X-CSRF-Token':auth.csrf}:{}),...extra},body:input?JSON.stringify(input):undefined});
+    return {response,data:await response.json()};
+  }
+  const initial=await request('/api/state');assert.equal(initial.data.auth.setup_required,true);
+  assert.equal((await request('/api/players','POST',{name:'Взлом'})).response.status,401);
+  assert.equal((await request('/api/auth/setup','POST',{setup_key:'wrong'})).response.status,403);
+  const setup=await request('/api/auth/setup','POST',{setup_key:readFileSync(join(temp,'runtime','setup-key'),'utf8'),player_id:owner,login:'owner',password:'owner-password'});
+  assert.equal(setup.response.status,200);const cookie=setup.response.headers.get('set-cookie');assert.ok(cookie.includes('HttpOnly'));assert.ok(cookie.includes('SameSite=Lax'));
+  const admin={cookie:cookie.split(';')[0],csrf:setup.data.state.auth.user.csrf};
+  assert.equal((await request('/api/meeting','PUT',{hours:3,public_url:''},{...admin,csrf:'wrong'})).response.status,403);
+  assert.equal((await request('/api/meeting','PUT',{hours:3,public_url:''},admin,{Origin:'https://foreign.example'})).response.status,403);
+  assert.equal((await request('/api/meeting','PUT',{hours:3,public_url:''},admin)).response.status,200);
+  const reg=await request('/api/auth/register','POST',{name:'Новичок',login:'rookie',password:'rookie-password'});
+  assert.equal(reg.response.status,200);const rookie={cookie:reg.response.headers.get('set-cookie').split(';')[0],csrf:reg.data.state.auth.user.csrf},id=reg.data.state.auth.user.player_id;
+  assert.equal(reg.data.state.players.length,2);assert.equal(reg.data.state.newcomers.length,1);
+  const match={player_a:id,player_b:owner,best_of:1,sets:[[11,5]],played_at:new Date(Date.now()-60000).toISOString()};
+  const proposal=await request('/api/matches','POST',match,rookie);assert.equal(proposal.response.status,200);assert.equal(proposal.data.state.matches.length,0);
+  const pid=proposal.data.id;
+  assert.equal((await request(`/api/proposals/${pid}/decision`,'POST',{decision:'confirm',reason:'Подтверждаю'},rookie)).response.status,403);
+  const confirmed=await request(`/api/proposals/${pid}/decision`,'POST',{decision:'confirm',reason:'Видел игру'},admin);
+  assert.equal(confirmed.response.status,200);assert.equal(confirmed.data.state.matches.length,1);assert.equal(confirmed.data.state.newcomers.length,0);
+  assert.equal(confirmed.data.state.players.find(p=>p.id===id).rating,1016);
+  assert.equal((await request(`/api/players/${other}/socials`,'PUT',{socials:{},public:true},rookie)).response.status,403);
+  assert.equal((await request(`/api/players/${id}/socials`,'PUT',{socials:{telegram:'@rookie_ping'},public:false},rookie)).response.status,200);
+  const pub=await request('/api/state');assert.deepEqual(pub.data.players.find(p=>p.id===id).socials,{});assert.deepEqual(pub.data.accounts,[]);assert.deepEqual(pub.data.audit,[]);
+  for(const asset of ['/','/app.js','/community.js','/qrcodegen.js','/zazerkalye.css'])assert.equal((await fetch(origin+asset)).status,200);
+  assert.equal((await request('/api/auth/logout','POST',{},rookie)).response.status,200);
+  assert.equal((await request('/api/state','GET',undefined,rookie)).data.auth.user,null);
+});

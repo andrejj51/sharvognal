@@ -1,0 +1,152 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createStore,leadershipStats} from '../db.mjs';
+import {createClub} from '../club.mjs';
+
+async function fixture(t) {
+  const store=createStore();t.after(()=>store.close());
+  const owner=store.addPlayer({name:'Организатор'}),second=store.addPlayer({name:'Друг'}),third=store.addPlayer({name:'Наблюдатель'});
+  const club=createClub(store,{setupKey:'test-secret'});
+  const token=await club.setup({setup_key:'test-secret',player_id:owner,login:'owner',password:'owner-password'});
+  const admin=club.session(token);
+  const otherId=await club.createAccount(admin,{player_id:second,login:'friend',password:'friend-password',role:'player'});
+  const trustedId=await club.createAccount(admin,{player_id:third,login:'trusted',password:'trusted-password',role:'trusted'});
+  const other=club.session(await club.login({login:'friend',password:'friend-password'}));
+  const trusted=club.session(await club.login({login:'trusted',password:'trusted-password'}));
+  const match={player_a:second,player_b:owner,best_of:1,sets:[[11,5]],played_at:new Date(Date.now()-3600000).toISOString()};
+  return {store,club,admin,other,trusted,token,owner,second,third,otherId,trustedId,match};
+}
+test('Setup is secret-protected and single-use; migration preserves existing results and selected trophies',async t=>{
+  const store=createStore();t.after(()=>store.close());
+  const a=store.addPlayer({name:'Первый'}),b=store.addPlayer({name:'Второй'});
+  for(let i=0;i<5;i++)store.saveMatch({player_a:a,player_b:b,best_of:1,sets:[[11,4]],played_at:new Date(Date.now()-600000+i*1000).toISOString()});
+  store.setMain(a,'bobyl');const before=store.state();
+  const club=createClub(store,{setupKey:'correct'});
+  await assert.rejects(club.setup({setup_key:'wrong'}),{status:403});
+  await club.setup({setup_key:'correct',player_id:a,login:'owner',password:'long-password'});
+  await assert.rejects(club.setup({setup_key:'correct'}),{status:409});
+  const after=club.state(null);assert.equal(after.players.length,2);assert.deepEqual(after.matches,before.matches);assert.deepEqual(after.earned,before.earned);
+  assert.equal(after.players.find(p=>p.id===a).main_award,'bobyl');
+  assert.equal(after.auth.user,null);assert.equal(after.accounts.length,0);
+  assert.ok(!JSON.stringify(after).includes('password_hash'));
+});
+test('Newcomer joins only during a meeting and first result needs a trusted witness',async t=>{
+  const f=await fixture(t),{club,store,admin,other,trusted,match}=f;
+  await assert.rejects(club.register({name:'Новичок',login:'rookie',password:'rookie-password'}),{status:403});
+  club.saveMeeting(admin,{hours:3,public_url:''});
+  const token=await club.register({name:'Новичок',login:'rookie',password:'rookie-password'}),rookie=club.session(token);
+  let s=club.state(rookie);assert.equal(s.newcomers.length,1);assert.equal(s.players.length,3);assert.equal(s.newcomers[0].rating,1000);
+  const id=club.submitMatch(rookie,{...match,player_a:rookie.player_id,player_b:other.player_id});
+  assert.equal(store.state().matches.length,0);assert.equal(store.state().earned.length,0);
+  assert.throws(()=>club.decide(rookie,id,{decision:'confirm',reason:'Подтверждаю'}),{status:403});
+  assert.throws(()=>club.decide(other,id,{decision:'confirm',reason:'Подтверждаю'}),{status:403});
+  club.decide(trusted,id,{decision:'confirm',reason:'Видел игру'});
+  s=club.state(rookie);assert.equal(s.newcomers.length,0);assert.equal(s.players.length,4);assert.equal(s.players.find(p=>p.id===rookie.player_id).rating,1016);assert.equal(s.matches.length,1);
+  assert.throws(()=>club.decide(trusted,id,{decision:'confirm',reason:'Ещё раз'}),{status:409});
+  club.saveMeeting(admin,{hours:0,public_url:''});
+  assert.equal(club.state(null).meeting.open,false);
+  store.db.prepare("UPDATE club_settings SET join_until='2000-01-01T00:00:00.000Z'").run();
+  await assert.rejects(club.register({name:'Поздний',login:'late',password:'late-password'}),{status:403});
+});
+test('Players cannot self-confirm, forge another match, moderate, or change other profiles',async t=>{
+  const {club,admin,other,trusted,match,owner,third}=await fixture(t);
+  assert.throws(()=>club.submitMatch(null,match),{status:401});
+  assert.throws(()=>club.submitMatch(other,{...match,player_a:owner,player_b:third}),{status:403});
+  const id=club.submitMatch(other,{...match,observed:true});
+  assert.equal(club.state(other).matches.length,0);
+  assert.throws(()=>club.decide(other,id,{decision:'confirm',reason:'Сам выиграл'}),{status:403});
+  assert.throws(()=>club.saveMeeting(other,{hours:3,public_url:''}),{status:403});
+  assert.throws(()=>club.addPlayer(other,{name:'Лишний'}),{status:403});
+  assert.throws(()=>club.saveSocials(other,owner,{socials:{},public:true}),{status:403});
+  assert.throws(()=>club.setMain(other,owner,{award_id:null}),{status:403});
+  club.decide(admin,id,{decision:'confirm',reason:'Счёт верный'});
+  assert.equal(club.state(other).matches.length,1);
+  assert.throws(()=>club.editMatch(other,1,{...match,reason:'Изменяю'}),{status:403});
+  assert.throws(()=>club.editMatch(trusted,1,{...match,reason:'Изменяю'}),{status:403});
+});
+test('Opponent can confirm normal games; witness can record and confirm immediately',async t=>{
+  const {club,other,trusted,match,admin}=await fixture(t);
+  const id=club.submitMatch(admin,{...match,observed:false});
+  club.decide(other,id,{decision:'confirm',reason:'Согласен со счётом'});
+  const id2=club.submitMatch(trusted,{...match,played_at:new Date(Date.now()-60000).toISOString(),observed:true});
+  assert.equal(club.state(other).matches.length,2);
+  assert.throws(()=>club.submitMatch(trusted,{...match,played_at:club.state(other).matches[0].played_at,observed:true}),/уже записан/);
+  assert.ok(id2>id);
+});
+test('Disputes are admin-only; correction replays subsequent Elo and clears linked disputes',async t=>{
+  const {club,store,other,trusted,admin,match}=await fixture(t);
+  const id=club.submitMatch(other,match);
+  club.decide(admin,id,{decision:'confirm',reason:'Подтверждаю'});
+  const mid=club.state(admin).matches[0].id;
+  club.submitMatch(trusted,{...match,played_at:new Date(Date.now()-30000).toISOString(),observed:true});
+  const before=store.state().players.find(p=>p.id===other.player_id).rating;
+  const dispute=club.disputeMatch(other,mid,{reason:'Счёт записали наоборот'});
+  assert.equal(club.state(admin).matches.length,2);
+  assert.throws(()=>club.decide(trusted,dispute,{decision:'confirm',reason:'Счёт верный'}),{status:403});
+  assert.throws(()=>club.editMatch(admin,mid,{...match,sets:[[5,11]],reason:''}),/причину/);
+  club.editMatch(admin,mid,{...match,sets:[[5,11]],reason:'Перепутаны стороны'});
+  assert.equal(club.state(admin).proposals.length,0);
+  assert.ok(store.state().players.find(p=>p.id===other.player_id).rating<before);
+  const log=club.state(admin).audit.find(t=>t.action==='edit-match');assert.equal(log.reason,'Перепутаны стороны');assert.equal(JSON.parse(log.before.sets)[0][0],11);assert.equal(JSON.parse(log.after.sets)[0][0],5);
+  club.disputeMatch(other,mid,{reason:'Повторная ошибка'});
+  club.editMatch(admin,mid,{reason:'Матч внесён ошибочно'},true);
+  assert.equal(club.state(admin).matches.length,1);assert.equal(club.state(admin).proposals.length,0);
+});
+test('Pending dispute and withdrawal do not affect ratings; rejected confirmed game is removed',async t=>{
+  const {club,admin,other,trusted,match}=await fixture(t);
+  const id=club.submitMatch(other,match);
+  club.decide(admin,id,{decision:'dispute',reason:'Не тот счёт'});
+  assert.equal(club.state(admin).matches.length,0);
+  assert.throws(()=>club.decide(trusted,id,{decision:'confirm',reason:'Уверен'}),{status:403});
+  club.decide(admin,id,{decision:'reject',reason:'Игра не состоялась'});
+  const id2=club.submitMatch(other,match);club.decide(other,id2,{decision:'withdraw',reason:'Ошибочная заявка'});
+  assert.equal(club.state(other).proposals.length,0);
+  const id3=club.submitMatch(trusted,{...match,observed:true});
+  const mid=club.state(admin).matches[0].id;
+  const ticket=club.disputeMatch(other,mid,{reason:'Это была разминка'});
+  club.decide(admin,ticket,{decision:'reject',reason:'Разминку не учитываем'});
+  assert.equal(club.state(admin).matches.length,0);assert.equal(club.state(admin).proposals.length,0);
+  assert.equal(club.state(admin).players.find(p=>p.id===other.player_id).rating,1000);
+  assert.ok(id3>id2);
+});
+test('Private socials, CSRF, session revocation, blocking and password reset enforce permissions',async t=>{
+  const {club,admin,other,trusted,otherId,token,match}=await fixture(t);
+  club.saveSocials(other,other.player_id,{socials:{telegram:'@friend_ping'},public:false});
+  assert.equal(club.state(other).players.find(p=>p.id===other.player_id).socials.telegram,'https://t.me/friend_ping');
+  assert.deepEqual(club.state(null).players.find(p=>p.id===other.player_id).socials,{});
+  assert.deepEqual(club.state(trusted).players.find(p=>p.id===other.player_id).socials,{});
+  assert.throws(()=>club.checkCsrf(other,'wrong'),{status:403});club.checkCsrf(other,other.csrf);
+  assert.equal(club.session('invalid'),null);
+  club.submitMatch(other,match);assert.equal(club.state(other).matches.length,0);
+  club.logout(token);assert.equal(club.session(token),null);
+});
+test('Blocked sessions stop working immediately; administrators can reset passwords and recover access',async t=>{
+  const {club,admin,other,otherId,match}=await fixture(t);
+  await club.manageAccount(admin,otherId,{role:'player',blocked:true,reason:'Проверка блокировки'});
+  assert.throws(()=>club.submitMatch(other,match),{status:401});
+  await assert.rejects(club.login({login:'friend',password:'friend-password'}),{status:401});
+  await club.manageAccount(admin,otherId,{role:'trusted',blocked:false,password:'new-password-123',reason:'Восстановлен доступ'});
+  await assert.rejects(club.login({login:'friend',password:'friend-password'}),{status:401});
+  const newToken=await club.login({login:'friend',password:'new-password-123'});
+  assert.equal(club.session(newToken).role,'trusted');club.logout(newToken);assert.equal(club.session(newToken),null);
+  await assert.rejects(club.manageAccount(admin,admin.id,{role:'player',blocked:true,reason:'Удаляю владельца'}),/администратора/);
+});
+test('A late newcomer cannot accumulate historical leader days before entering the rating',()=>{
+  const day=n=>new Date(Date.UTC(2026,0,n)).toISOString();
+  const players=[{id:1},{id:2},{id:3,ranked_at:day(5)}];
+  const matches=[{id:1,player_a:1,player_b:2,winner_id:1,after_a:990,after_b:980,played_at:day(1)},
+    {id:2,player_a:3,player_b:2,winner_id:3,after_a:1016,after_b:964,played_at:day(5)}];
+  const stats=leadershipStats(players,matches,Date.parse(day(7)));
+  assert.equal(stats.get(1).leader_days,4);assert.equal(stats.get(3).leader_days,2);
+});
+test('Administrator can correct a pending disputed score and confirm it atomically',async t=>{
+  const {club,admin,other,trusted,match}=await fixture(t);
+  const id=club.submitMatch(other,match);club.decide(admin,id,{decision:'dispute',reason:'Стороны перепутаны'});
+  assert.throws(()=>club.editProposal(trusted,id,{...match,reason:'Исправляю'}),{status:403});
+  assert.throws(()=>club.editProposal(admin,id,{...match,sets:[[11,10]],reason:'Исправляю'}),/Партия/);
+  assert.equal(club.state(admin).proposals[0].status,'disputed');
+  club.editProposal(admin,id,{...match,sets:[[5,11]],reason:'Исправлены стороны'});
+  assert.equal(club.state(admin).proposals.length,0);assert.equal(club.state(admin).matches.length,1);
+  assert.equal(club.state(admin).players.find(p=>p.id===other.player_id).rating,984);
+  assert.equal(club.state(admin).audit.find(t=>t.action==='edit-proposal').reason,'Исправлены стороны');
+});

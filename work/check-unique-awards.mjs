@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+const root='http://127.0.0.1:8787';
+const r=await fetch(root+'/api/state');assert.equal(r.status,200);const state=await r.json();
+assert.equal(state.awards.length,15);assert.equal(new Set(state.awards.map(a=>a.character)).size,15);
+assert.ok(state.awards.every(a=>a.character));assert.equal(state.players.length,7);assert.equal(state.matches.length,62);
+assert.equal(state.awards.find(a=>a.id==='comeback').character,'Пацаноид');
+assert.equal(state.awards.find(a=>a.id==='knees').character,'Коленыч');
+assert.ok(state.players.every(p=>!p.main_award||state.earned.some(e=>e.player_id===p.id&&e.award_id===p.main_award)));
+const css=await(await fetch(root+'/style.css')).text();assert.ok(css.includes('/award-atlas-unique-characters.png'));
+const art=await fetch(root+'/award-atlas-unique-characters.png');assert.equal(art.status,200);
+const bytes=Buffer.from(await art.arrayBuffer());assert.equal(bytes.readUInt32BE(16),bytes.readUInt32BE(20));
+console.log(JSON.stringify({characters:15,awards:15,matches:state.matches.length,earned:state.earned.length,atlas:bytes.readUInt32BE(16)+'px',status:'passed'}));

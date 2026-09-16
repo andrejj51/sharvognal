@@ -1,0 +1,23 @@
+data/*.sqlite*
+.runtime/
+node_modules/
+ADMIN-SETUP.txt
+
+work/backups/
+work/*.sqlite*
+work/ui-runtime/
+work/transfer-ranked.ps1
+
+# Local configuration and transfer metadata
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+TRANSFER.json
+
+# Cached web pages and API responses used while collecting art references
+work/originals/*.html
+work/originals/media.json
+work/originals/posts.json
+

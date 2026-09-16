@@ -1,0 +1,17 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+const root='C:/Users/peche/Documents/ChatGPT/ranked';
+const path=root+'/public/app.js';
+let text=readFileSync(path,'utf8');
+text=text.replace(' / 14 трофеев',' / ${state.awards.length} трофеев').replace('${earned.length} из 14 открыто','${earned.length} из ${state.awards.length} открыто');
+text=text.replace('<div class="eyebrow">Особый трофей</div><h2>В полтинниках<br>пока побудешь</h2><p>Опуститься ниже 1000. Вернуться обратно. Получить условную реабилитацию.</p>', '<div class="eyebrow">Секретная коллекция</div><h2>Трофеи пока<br>в тени</h2><p>Доведите прогресс до 100%, чтобы узнать, кто поселится в вашем профиле.</p>');
+text=text.replace('Все 14 наград →','Все ${state.awards.length} наград →');
+writeFileSync(path,text);
+const index=root+'/public/index.html';
+writeFileSync(index,readFileSync(index,'utf8').replace('Мемные трофеи <span>14</span>','Мемные трофеи <span>15</span>'));
+const css=root+'/public/style.css';
+writeFileSync(css,readFileSync(css,'utf8')+'\n.award-card.locked{min-height:96px;background:#101c17}.award-card.locked .award-content{justify-content:center}.award-card.locked .progress-block{margin-top:0}\n');
+const readme=root+'/README.md';
+let doc=readFileSync(readme,'utf8').replace('14 мемных трофеев','15 мемных трофеев');
+doc=doc.replace('Закрытые карточки затемнены, прогресс остаётся ярким.', 'У закрытых карточек нет названия, подписи или изображения: показываются только шкала прогресса и числа Elo. Карточка раскрывается только после достижения 100%. Для особого результата вместо Elo показан счётчик соперников 0/3–3/3.');
+doc=doc.replace('## Данные и резервная копия', 'Награда «На колени поставит»: выиграть матч 3:0 хотя бы один раз против каждого из трёх сильнейших соперников по текущему рейтингу. Сам игрок исключается из топа. Нужны минимум четыре игрока в компании. Учитываются только завершённые матчи до трёх побед (формат из пяти партий). Повторная победа над тем же соперником прогресс не увеличивает. Топ-3 определяется после каждого матча: рейтинг, затем число побед, затем порядок добавления. Предыдущие победы 3:0 засчитываются против текущих участников топа. Пока награда закрыта, её прогресс меняется вместе с составом топ-3; после открытия награда сохраняется.\n\n## Данные и резервная копия');
+writeFileSync(readme,doc);

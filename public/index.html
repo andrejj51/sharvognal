@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Зазеркалье — пинг-понг с друзьями</title>
+  <meta name="description" content="Матчи, рейтинг и коллекция мемных наград вашей компании.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/zazerkalye.css">
+  <script src="/qrcodegen.js" defer></script><script src="/community.js" defer></script><script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="#table"><span class="brand-mark" aria-hidden="true"><svg class="brand-paddle" viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(-22 16 21)"><path d="M16 23v12" stroke="#523a24" stroke-width="7" stroke-linecap="round"/><path d="M16 24v11" stroke="#c39a58" stroke-width="4" stroke-linecap="round"/><ellipse cx="16" cy="15" rx="10" ry="12" fill="#af5843" stroke="#e1c184" stroke-width="2"/><path d="M10 9c1-2 3-3 5-3" stroke="#e4a17b" stroke-width="1.5" stroke-linecap="round"/></g><circle cx="28" cy="5" r="2.5" fill="#f0e7bf"/></svg></span><span>ЗАЗЕРКАЛЬЕ<small>ПИНГ-ПОНГ КЛУБ</small></span></a><span class="local-label">Пинг-понг клуб</span><div id="account-bar" class="account-bar"></div><button class="button primary" data-action="new-match">＋ Добавить матч</button></header>
+  <div class="shell"><nav class="navigation" aria-label="Основная навигация"><a href="#table" data-nav="table">Таблица друзей</a><a href="#history" data-nav="history">История матчей</a><a href="#awards" data-nav="awards">Мемные трофеи <span></span></a><a href="#moderation" data-nav="moderation" hidden>Подтвердить матчи</a><a href="#join" data-nav="join">Присоединиться</a><div class="nav-note"><strong>1000</strong><span>С этого всё начинается.<br>Дальше — как пойдёт.</span></div></nav><main id="app" aria-live="polite"><p>Загружаем таблицу…</p></main></div>
+  <dialog id="dialog"><div id="dialog-content"></div></dialog>
+  <div id="toast" class="toast" role="status"></div>
+</body></html>
