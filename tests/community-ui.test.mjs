@@ -41,6 +41,55 @@ test('Joining, invitations and pending profiles render without external services
   html=vm.runInContext('playerAvatar(player(3))',ctx);assert.ok(!html.includes('podium-'));assert.ok(!html.includes('Infinity'));
   assert.equal(vm.runInContext('matchPlayers().length',ctx),3);
 });
+
+test('The awards route shows the signed-in player collection, matching their profile for members and newcomers',async t=>{
+  const store=createStore();t.after(()=>store.close());
+  store.addPlayer({name:'Тимофей'});store.addPlayer({name:'Андрей'});
+  const club=createClub(store,{setupKey:'personal-awards-secret'});
+  const owner=club.session(await club.setup({setup_key:'personal-awards-secret',player_id:2,login:'owner',password:'owner6'}));
+  assert.notEqual(owner.id,owner.player_id);
+  await club.createAccount(owner,{player_id:1,login:'member',password:'member6',role:'player'});
+  const member=club.session(await club.login({login:'member',password:'member6'}));
+  store.saveMatch({player_a:1,player_b:2,best_of:1,sets:[[11,0]],played_at:'2026-01-01T12:00:00Z'});
+  store.saveMatch({player_a:1,player_b:2,best_of:1,sets:[[11,5]],played_at:'2026-01-02T12:00:00Z'});
+  store.setMain(2,'under-table');
+  club.saveMeeting(owner,{hours:3});
+  const newcomer=club.session(await club.register({name:'Новичок',login:'newcomer',password:'newcomer6'}));
+  const cards=html=>[...html.matchAll(/<article\b[\s\S]*?<\/article>/g)].map(m=>m[0]);
+  for(const user of [owner,member,newcomer]){
+    const fixture=club.state(user),ctx=context(fixture);
+    ctx.location.hash='#awards';
+    ctx.document.querySelectorAll=()=>[];ctx.document.querySelector=()=>({});
+    const container=vm.runInContext('app',ctx);container.querySelectorAll=()=>[];
+    vm.runInContext('render()',ctx);
+    const html=container.innerHTML,profile=vm.runInContext(`profilePage(${user.player_id})`,ctx);
+    assert.deepEqual(cards(html),cards(profile));assert.equal(cards(html).length,33);
+    const own=fixture.earned.filter(e=>e.player_id===user.player_id);
+    assert.ok(html.includes(`Ваша коллекция: ${own.length} из 33 открыто.`));
+    assert.ok(html.includes(`href="#player/${user.player_id}">Мой профиль`));
+    for(const e of own)assert.ok(html.includes(`id="award-${user.player_id}-${e.award_id}"`));
+    assert.ok(!html.includes(`id="award-${user.player_id===1?2:1}-first-game"`));
+    if(user===owner){assert.ok(html.includes('★ Главный трофей'));assert.ok(!html.includes('Шар вогнал'));}
+    if(user===member){assert.ok(html.includes('Шар вогнал'));assert.ok(html.includes('Посмотреть игру'));assert.ok(html.includes('Сделать главным'));assert.ok(html.includes('value="62"'));}
+    if(user===newcomer){assert.ok(!html.includes('award-art'));assert.equal((html.match(/class="award-card locked/g)||[]).length,33);}
+    ctx.fixture=club.state(null);vm.runInContext('state=fixture;render()',ctx);
+    assert.ok(!container.innerHTML.includes('award-art'));assert.ok(!container.innerHTML.includes('Ваша коллекция:'));
+  }
+});
+
+test('Guest awards remain hidden with zero progress even when club members have earned trophies',t=>{
+  const store=createStore();t.after(()=>store.close());
+  store.addPlayer({name:'Тимофей'});store.addPlayer({name:'Андрей'});
+  store.saveMatch({player_a:1,player_b:2,best_of:1,sets:[[16,14]],played_at:'2026-01-01T12:00:00Z'});
+  const club=createClub(store),fixture=club.state(null),ctx=context(fixture);
+  assert.ok(fixture.earned.length>0);
+  const html=vm.runInContext('awardsPage()',ctx);
+  assert.ok(html.includes('Имена и изображения закрытых наград скрыты. Прогресс вашей коллекции — в профиле игрока.'));
+  assert.equal((html.match(/class="award-card locked/g)||[]).length,33);
+  assert.equal((html.match(/<progress max="100" value="0"/g)||[]).length,33);
+  assert.ok(!html.includes('award-art'));assert.ok(!html.includes('main-award'));assert.ok(!html.includes('award-match'));
+  for(const a of fixture.awards)assert.ok(!html.includes(a.title));
+});
 test('Profile point totals include all confirmed sets on either side and follow corrections and deletions',async t=>{
   const store=createStore();t.after(()=>store.close());
   for(const name of ['Андрей','Боря','Вера','Новичок'])store.addPlayer({name});
