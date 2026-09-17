@@ -65,7 +65,7 @@ function moderationPage() {
 }
 function decisionDialog(id,decision) {
   const labels={confirm:'Подтвердить результат',reject:'Отклонить результат',dispute:'Оспорить результат',withdraw:'Отозвать заявку'};
-  modal(labels[decision],`<form id="decision-form" data-id="${id}" data-decision="${decision}"><label class="field">${decision==='confirm'?'Подтверждение':'Причина'}<textarea name="reason" required minlength="3" maxlength="300" rows="3">${decision==='confirm'?'Счёт верный, подтверждаю':''}</textarea></label><p class="form-help">${decision==='reject'?'Если матч уже учтён, его отмена пересчитает рейтинг и награды.':decision==='dispute'?'Заявку рассмотрит администратор.':'Решение будет записано в журнал.'}</p>${authFooter(labels[decision])}</form>`);
+  modal(labels[decision],`<form id="decision-form" data-id="${id}" data-decision="${decision}"><label class="field">${decision==='confirm'?'Подтверждение':'Причина'}<textarea name="reason" required minlength="3" maxlength="300" rows="5" placeholder="Кратко опишите причину" autofocus>${decision==='confirm'?'Счёт верный, подтверждаю':''}</textarea></label><p class="form-help">${decision==='reject'?'Если матч уже учтён, его отмена пересчитает рейтинг и награды.':decision==='dispute'?'Заявку рассмотрит администратор.':'Решение будет записано в журнал.'}</p>${authFooter(labels[decision])}</form>`);
 }
 function accountDialog(id) {
   const a=state.accounts.find(a=>a.id===id);if(!a)return;
@@ -105,7 +105,7 @@ document.addEventListener('click',async event=>{
       if(!m){notify('Матч не найден. Обновите страницу.',true);return;}
       modal('Подтверждённый матч',`<p class="form-help">${fmtDate(m.played_at,true)}</p>${matchRow(m)}<p class="form-help">${esc(m.name_a)}: ${m.before_a} → ${m.after_a} Elo<br>${esc(m.name_b)}: ${m.before_b} → ${m.after_b} Elo</p><div class="form-footer"><a class="button ghost" href="#history" data-action="close">Вся история</a><button class="button primary" data-action="close">Закрыть</button></div>`);
     }
-    else if(b.dataset.action==='dispute-match')modal('Оспорить матч',`<form id="dispute-form" data-id="${b.dataset.id}"><label class="field">Что нужно исправить?<textarea name="reason" required minlength="3" maxlength="300" rows="3"></textarea></label><p class="form-help">До решения администратора текущий результат остаётся в рейтинге.</p>${authFooter('Отправить спор')}</form>`);
+    else if(b.dataset.action==='dispute-match')modal('Оспорить матч',`<form id="dispute-form" data-id="${b.dataset.id}"><label class="field">Что нужно исправить?<textarea name="reason" required minlength="3" maxlength="300" rows="5" placeholder="Например: во второй партии было 11:8, а записано 11:6." autofocus></textarea></label><p class="form-help">До решения администратора текущий результат остаётся в рейтинге.</p>${authFooter('Отправить спор')}</form>`);
     else if(b.dataset.action==='copy-invite'){await navigator.clipboard.writeText(inviteUrl());notify('Ссылка скопирована.');}
     else if(b.dataset.action==='download-qr'){
       const blob=new Blob([qrSvg(inviteUrl())],{type:'image/svg+xml'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='zazerkalye-invite.svg';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
