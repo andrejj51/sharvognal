@@ -90,6 +90,11 @@ main{min-width:0;padding:30px 32px 50px}
 .stat>span{font-size:.875rem;color:#c3caaf}
 .stat strong{font-family:Consolas,"Courier New",monospace;font-size:2rem;letter-spacing:0;color:#ede5b8;margin-top:5px;line-height:1.25}
 .stat::after{content:"";position:absolute;width:5px;height:5px;right:8px;top:8px;background:#a29468;border:1px solid #3a3c2a;box-shadow:0 1px 2px #0006;transform:rotate(45deg)}
+.profile-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+.profile-stats .stat{min-width:0}
+.point-score{display:inline-block;white-space:nowrap;font-size:clamp(1rem,1.65vw,1.65rem)}
+.stat .point-share{display:inline-block;margin-left:8px;font:600 .8125rem "Segoe UI",Arial,sans-serif;letter-spacing:0;white-space:nowrap;color:var(--lime)}
+@media(max-width:1100px){.profile-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .dashboard-grid{grid-template-columns:minmax(0,1fr) 270px;gap:21px}
 .panel{border:1px solid #64704c;border-radius:6px;background:linear-gradient(145deg,#29362133,transparent 60%),#1b251b;box-shadow:0 4px 15px #0002}
 .panel-head{padding:20px;border-bottom:1px solid #6271464d;background:linear-gradient(90deg,#4b50322b,transparent);gap:12px}
