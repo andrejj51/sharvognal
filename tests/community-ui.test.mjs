@@ -71,3 +71,42 @@ test('Player sees confirmation controls but no admin actions; admin can correct 
   vm.runInContext("state.auth.user.role='admin'",ctx);html=vm.runInContext('proposalCard(proposal)',ctx);assert.ok(html.includes('edit-proposal'));assert.ok(html.includes('Отклонить'));
   const qr=vm.runInContext("qrcodegen.QrCode.encodeText('https://club.example/#join',qrcodegen.QrCode.Ecc.MEDIUM)",ctx);assert.ok(qr.size>=21);assert.equal(qr.getModule(-1,-1),false);
 });
+test('Match award text links both players to their earned cards and follows history corrections',async t=>{
+  const store=createStore();t.after(()=>store.close());
+  store.addPlayer({name:'Тимофей'});store.addPlayer({name:'Андрей & Ко'});
+  const club=createClub(store,{setupKey:'match-links-secret'});
+  const owner=club.session(await club.setup({setup_key:'match-links-secret',player_id:1,login:'owner',password:'owner6'}));
+  const game={player_a:1,player_b:2,best_of:1,sets:[[11,0]],played_at:'2026-01-01T12:00:00Z'};
+  const first=store.saveMatch(game),second=store.saveMatch({...game,played_at:'2026-01-02T12:00:00Z'});
+  const third=store.saveMatch({...game,played_at:'2026-01-03T12:00:00Z'});
+  club.submitMatch(owner,{...game,played_at:'2026-01-04T12:00:00Z'});
+  const row=id=>{const ctx=context(club.state(null));ctx.matchId=id;return vm.runInContext('matchRow(state.matches.find(m=>m.id===matchId))',ctx);};
+  let html=row(first);
+  assert.ok(html.includes('Тимофей:'));assert.ok(html.includes('Андрей &amp; Ко:'));
+  assert.ok(html.includes('href="#player/1/award/first-game"'));assert.ok(html.includes('href="#player/2/award/first-game"'));
+  assert.ok(html.includes('href="#player/1/award/shar-vognal"'));
+  assert.ok(!html.includes('href="#player/2/award/shar-vognal"'));assert.ok(!html.includes('/award/bobyl'));
+  assert.ok(!row(second).includes('/award/first-game'));assert.ok(!row(second).includes('/award/shar-vognal'));
+  assert.ok(!row(third).includes('match-awards'));
+  const ctx=context(club.state(null));
+  const profile=vm.runInContext('profilePage(2)',ctx);
+  assert.ok(profile.includes('id="award-2-first-game" tabindex="-1"'));assert.ok(!profile.includes('id="award-2-shar-vognal"'));
+  store.db.prepare('UPDATE awards SET title=? WHERE id=?').run('Первый <матч> & трофей','first-game');
+  assert.ok(row(first).includes('«Первый &lt;матч&gt; &amp; трофей»'));
+  club.editMatch(owner,first,{...game,sets:[[11,7]],reason:'Исправлен счёт'});
+  assert.ok(!row(first).includes('/award/shar-vognal'));assert.ok(row(second).includes('/award/shar-vognal'));
+  club.editMatch(owner,first,{reason:'Матч внесён ошибочно'},true);
+  html=row(second);assert.ok(html.includes('/award/first-game'));assert.ok(html.includes('/award/shar-vognal'));
+});
+test('Award navigation focuses the matching earned card and rejects locked or malformed targets',()=>{
+  const fixture=structuredClone(base);fixture.earned=[{player_id:1,award_id:'first-game'}];
+  const ctx=context(fixture),calls=[];
+  const card={classList:{add:cls=>calls.push(cls)},focus:options=>calls.push({focus:options.preventScroll}),scrollIntoView:options=>calls.push({scroll:options.block})};
+  ctx.document.getElementById=id=>id==='award-1-first-game'?card:null;
+  assert.equal(vm.runInContext("focusAward(['player','1','award','first-game'])",ctx),true);
+  assert.deepEqual(calls,['award-highlight',{focus:true},{scroll:'start'}]);
+  for(const route of [['player','2','award','first-game'],['player','1','award','locked'],['player','1','award','%broken'],['history']]){
+    ctx.route=route;assert.equal(vm.runInContext('focusAward(route)',ctx),false);
+  }
+  assert.equal(calls.length,3);
+});

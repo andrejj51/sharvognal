@@ -27,10 +27,33 @@ function pointStats(id,matches) {
   const total=scored+conceded,percent=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(total?scored/total*100:0);
   return `<span class="point-score">${scored} / ${conceded}</span><small class="point-share" title="Доля набранных очков от всех очков в подтверждённых матчах" aria-label="Доля набранных очков: ${percent}%">${percent}%</small>`;
 }
+function awardCardId(playerId,awardId) {return `award-${playerId}-${awardId}`;}
+function matchAwards(m) {
+  const groups=new Map();
+  for(const earned of state.earned.filter(e=>e.match_id===m.id)){
+    const p=player(earned.player_id),a=state.awards.find(a=>a.id===earned.award_id);
+    if(!p||!a)continue;
+    if(!groups.has(p.id))groups.set(p.id,{player:p,awards:[]});
+    groups.get(p.id).awards.push(a);
+  }
+  return groups.size?`<div class="match-awards" aria-label="Достижения за матч">${[...groups.values()].map(({player:p,awards})=>`<p>${esc(p.name)}: ${awards.map(a=>`<a href="#player/${p.id}/award/${encodeURIComponent(a.id)}" data-action="show-award">«${esc(a.title)}»</a>`).join(', ')}</p>`).join('')}</div>`:'';
+}
+function focusAward(route) {
+  if(route[0]!=='player'||route[2]!=='award'||!route[3])return false;
+  let awardId;try{awardId=decodeURIComponent(route[3]);}catch{return false;}
+  const id=Number(route[1]);
+  if(!earnedFor(id).some(e=>e.award_id===awardId))return false;
+  const card=document.getElementById(awardCardId(id,awardId));
+  if(!card)return false;
+  card.classList.add('award-highlight');
+  card.focus({preventScroll:true});
+  card.scrollIntoView({block:'start'});
+  return true;
+}
 function matchRow(m, edit=false, profileId=null) {
   const wa=m.sets.filter(s=>s[0]>s[1]).length, wb=m.sets.length-wa;
   const delta=profileId===m.player_b ? -m.delta_a : m.delta_a;
-  return `<div class="match-row"><div class="match-date">${fmtDate(m.played_at)}</div><div class="match-pair"><a href="#player/${m.player_a}" class="${m.winner_id===m.player_a?'winner':''}">${esc(m.name_a)}</a> <span class="meta">vs</span> <a href="#player/${m.player_b}" class="${m.winner_id===m.player_b?'winner':''}">${esc(m.name_b)}</a><div class="set-scores">${m.sets.map(s=>`${s[0]}:${s[1]}`).join(' · ')}</div></div><div class="match-score">${wa}:${wb}</div>${profileId ? `<strong class="${delta>=0?'positive':'negative'}">${signed(delta)}</strong>` : ''}${edit&&admin()?`<div class="actions"><button class="button small ghost" data-action="edit-match" data-id="${m.id}" aria-label="Исправить матч ${esc(m.name_a)} — ${esc(m.name_b)}">Изменить</button></div>`:edit&&currentUser()&&[m.player_a,m.player_b].includes(currentUser().player_id)?`<button class="button small ghost" data-action="dispute-match" data-id="${m.id}">Оспорить</button>`:''}</div>`;
+  return `<div class="match-row"><div class="match-date">${fmtDate(m.played_at)}</div><div class="match-pair"><a href="#player/${m.player_a}" class="${m.winner_id===m.player_a?'winner':''}">${esc(m.name_a)}</a> <span class="meta">vs</span> <a href="#player/${m.player_b}" class="${m.winner_id===m.player_b?'winner':''}">${esc(m.name_b)}</a><div class="set-scores">${m.sets.map(s=>`${s[0]}:${s[1]}`).join(' · ')}</div>${matchAwards(m)}</div><div class="match-score">${wa}:${wb}</div>${profileId ? `<strong class="${delta>=0?'positive':'negative'}">${signed(delta)}</strong>` : ''}${edit&&admin()?`<div class="actions"><button class="button small ghost" data-action="edit-match" data-id="${m.id}" aria-label="Исправить матч ${esc(m.name_a)} — ${esc(m.name_b)}">Изменить</button></div>`:edit&&currentUser()&&[m.player_a,m.player_b].includes(currentUser().player_id)?`<button class="button small ghost" data-action="dispute-match" data-id="${m.id}">Оспорить</button>`:''}</div>`;
 }
 const socialServices=[['telegram','Telegram','TG','https://t.me/имя или @username'],['vk','VK','VK','https://vk.com/имя'],['instagram','Instagram','IG','https://instagram.com/имя'],['discord','Discord','DS','https://discord.com/users/ID или discord.gg/…'],['other','Другая ссылка','↗','https://…/профиль']];
 function podiumRank(p) {const index=state.players.findIndex(row=>row.id===p.id);return index<0?Infinity:index+1;}
@@ -73,6 +96,7 @@ function render() {
   else if(route[0]==='player') app.innerHTML=profilePage(Number(route[1]));
   else app.innerHTML=tablePage();
   decorateCommunity(route);
+  return focusAward(route);
 }
 async function load() {try{state=await api('/api/state');render();}catch(error){app.innerHTML=`<div class="error-panel"><h2>Не удалось загрузить таблицу</h2><p>${esc(error.message)}</p><button class="button" data-action="reload">Попробовать ещё раз</button></div>`;}}
 function modal(title, body, cls='') {dialog.className=cls;document.getElementById('dialog-content').innerHTML=`<div class="dialog-head"><h2>${title}</h2><button class="close" data-action="close" aria-label="Закрыть">×</button></div><div class="dialog-body">${body}</div>`;dialog.showModal();}
@@ -106,7 +130,7 @@ function awardCard(a,p) {
   const badge=a.kind==='up'?`↑ ${a.threshold} Elo`:a.kind==='down'?`↓ ${a.threshold} Elo`:specialBadges[a.kind]|| (a.kind==='top-three'?'ОСОБОЕ · ТОП-3':a.kind==='clean-set'?'ОСОБОЕ · 11:0':a.kind==='rival-wins'?'ОСОБОЕ · СОПЕРНИК':'ОСОБОЕ · ВОЗВРАЩЕНИЕ');
   const obtained=earned.obtained;
   const details=`<div class="award-earned-info"><span class="eyebrow">Как получена</span><p>${esc(a.condition||'')}</p>${obtained?`<p class="award-earned-detail">${esc(obtained.description)}</p><button class="text-button award-match-link" data-action="award-match" data-id="${obtained.match_id}">Посмотреть игру →</button>`:''}</div>`;
-  return `<article class="award-card ${a.kind} ${earned?'earned':'locked'}"><div class="award-art" role="img" aria-label="Иллюстрация: ${esc(a.character||a.title)}" style="${a.image?`background-image:url('${esc(a.image)}');background-size:cover;background-position:center;`:`--art-x:${x}%;--art-y:${y}%`}"></div><div class="award-content"><div class="award-tag"><span>${badge}</span><span class="${earned?'earned-badge':''}">${earned?'✓ Получено':'Закрыто'}</span></div>${a.character?`<p class="award-character">${esc(a.character)}</p>`:''}<h3 class="award-name">${esc(a.title)}</h3><p class="award-caption">«${esc(a.caption)}»</p>${details}<div class="progress-block"><div class="progress-info"><span>${progress.label}</span><strong>${progress.percent}%</strong></div><progress max="100" value="${progress.percent}" aria-label="Прогресс награды ${esc(a.title)}"></progress><p class="progress-note">${esc(progress.note)}</p></div>${earned&&p&&canEditProfile(p.id)?`<button class="button small ghost" data-action="main-award" data-player="${p.id}" data-award="${a.id}">${p.main_award===a.id?'★ Главный трофей':'Сделать главным'}</button>`:''}</div></article>`;
+  return `<article id="${esc(awardCardId(p.id,a.id))}" tabindex="-1" class="award-card ${a.kind} ${earned?'earned':'locked'}"><div class="award-art" role="img" aria-label="Иллюстрация: ${esc(a.character||a.title)}" style="${a.image?`background-image:url('${esc(a.image)}');background-size:cover;background-position:center;`:`--art-x:${x}%;--art-y:${y}%`}"></div><div class="award-content"><div class="award-tag"><span>${badge}</span><span class="${earned?'earned-badge':''}">${earned?'✓ Получено':'Закрыто'}</span></div>${a.character?`<p class="award-character">${esc(a.character)}</p>`:''}<h3 class="award-name">${esc(a.title)}</h3><p class="award-caption">«${esc(a.caption)}»</p>${details}<div class="progress-block"><div class="progress-info"><span>${progress.label}</span><strong>${progress.percent}%</strong></div><progress max="100" value="${progress.percent}" aria-label="Прогресс награды ${esc(a.title)}"></progress><p class="progress-note">${esc(progress.note)}</p></div>${earned&&p&&canEditProfile(p.id)?`<button class="button small ghost" data-action="main-award" data-player="${p.id}" data-award="${a.id}">${p.main_award===a.id?'★ Главный трофей':'Сделать главным'}</button>`:''}</div></article>`;
 }
 function collections(p) {
   const groups=[['up','Обитатели верхнего стола','За рост рейтинга'],['down','Попущенные Зазеркалья','За падение ниже 1000'],['comeback','Условная реабилитация','Особое достижение'],[matchAchievementKinds,'Особые подвиги','За результаты матчей']];
@@ -211,9 +235,9 @@ if(document.modelContext?.registerTool){
   ];
   for(const tool of tools)try{Promise.resolve(document.modelContext.registerTool(tool)).catch(console.warn);}catch(error){console.warn(error);}
 }
-document.addEventListener('click',event=>{const button=event.target.closest('[data-action]');if(!button)return;const action=button.dataset.action;if(action==='close')dialog.close();else if(action==='new-player')newPlayer();else if(action==='reload')load();else if(action==='new-match')newMatch();else if(action==='edit-match')newMatch(Number(button.dataset.id));else if(action==='add-set')addSet();else if(action==='remove-set'){button.closest('.set-row').remove();renumberSets();}else if(action==='delete-match')deletePrompt(Number(button.dataset.id));else if(action==='confirm-delete')removeMatch(Number(button.dataset.id));else if(action==='settings')settings();else if(action==='edit-socials')editSocials(Number(button.dataset.player));else if(action==='main-award')chooseMain(Number(button.dataset.player),button.dataset.award);});
+document.addEventListener('click',event=>{const button=event.target.closest('[data-action]');if(!button)return;const action=button.dataset.action;if(action==='close')dialog.close();else if(action==='show-award'&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey){dialog.close();if(location.hash===button.getAttribute('href')){event.preventDefault();render();}}else if(action==='new-player')newPlayer();else if(action==='reload')load();else if(action==='new-match')newMatch();else if(action==='edit-match')newMatch(Number(button.dataset.id));else if(action==='add-set')addSet();else if(action==='remove-set'){button.closest('.set-row').remove();renumberSets();}else if(action==='delete-match')deletePrompt(Number(button.dataset.id));else if(action==='confirm-delete')removeMatch(Number(button.dataset.id));else if(action==='settings')settings();else if(action==='edit-socials')editSocials(Number(button.dataset.player));else if(action==='main-award')chooseMain(Number(button.dataset.player),button.dataset.award);});
 document.addEventListener('submit',async event=>{if(event.target.id!=='player-form')return;event.preventDefault();await submitForm(event.target,async()=>{await mutate('/api/players','POST',{name:new FormData(event.target).get('name')});notify('Друг добавлен. Допуск к столу оформлен.');});});
 async function mutate(path,method,body) {const result=await api(path,method,body);state=result.state;render();return result;}
 async function submitForm(form,fn) {const submit=form.querySelector('button:not([type="button"])');submit.disabled=true;form.querySelector('.form-error').textContent='';try{await fn();dialog.close();}catch(error){form.querySelector('.form-error').textContent=error.message;}finally{submit.disabled=false;}}
-window.addEventListener('hashchange',()=>{render();window.scrollTo(0,0);});
+window.addEventListener('hashchange',()=>{if(!render())window.scrollTo(0,0);});
 load();
